@@ -1,0 +1,147 @@
+{
+  "name": "prompt-learning-teacher",
+  "nodes": [
+    {
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "prompt-learning-teacher",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "prompt-learning-teacher",
+        "responseMode": "lastNode",
+        "responseData": "firstEntryJson"
+      }
+    },
+    {
+      "id": "root-cause-analysis",
+      "name": "Root Cause Analysis",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [300, 0],
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": {
+          "mode": "id",
+          "value": "claude-3-5-sonnet-20241022"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "user",
+              "content": "=Task Description:\n{{ $json.body.task_description }}\n\nCode Diff:\n```\n{{ $json.body.diff }}\n```\n\nError Logs:\n```\n{{ $json.body.error_logs }}\n```\n\nPlease analyze this test failure and explain:\n1. What specific error occurred\n2. WHY the code failed (root cause)\n3. The pattern of mistake"
+            }
+          ]
+        },
+        "options": {
+          "system": "You are a senior software engineer analyzing test failures.\n\nGiven:\n- Task Description: What the developer was trying to accomplish\n- Code Diff: The changes made to the codebase\n- Error Logs: The test failure output\n\nAnalyze and explain:\n1. What specific error occurred (be precise about the error type)\n2. WHY the code failed (identify the root cause)\n3. The pattern of mistake (e.g., \"forgot null check\", \"wrong API usage\", \"missing error handling\")\n\nBe concise and technical. Focus on actionable insights.",
+          "maxTokens": 1024
+        },
+        "simplify": true
+      }
+    },
+    {
+      "id": "rule-generator",
+      "name": "Rule Generator",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [600, 0],
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": {
+          "mode": "id",
+          "value": "claude-3-5-sonnet-20241022"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "user",
+              "content": "=Root Cause Analysis:\n{{ $json.text }}\n\nBased on this analysis, generate a preventive rule for the developer's CLAUDE.md file."
+            }
+          ]
+        },
+        "options": {
+          "system": "Based on the root cause analysis provided, write a SINGLE preventive rule for the developer's CLAUDE.md file. This rule should:\n\n1. Be actionable and specific\n2. Prevent this exact type of error in the future\n3. Follow this exact format:\n\n- **Rule**: [Clear instruction in imperative form]\n- **When**: [Context when this rule applies]\n- **Why**: [Brief explanation]\n\nExample:\n- **Rule**: Always check if array is empty before accessing index 0\n- **When**: Working with arrays from API responses or user input\n- **Why**: Prevents IndexError on empty results\n\nOnly output the rule in this format. No additional text.",
+          "maxTokens": 512
+        },
+        "simplify": true
+      }
+    },
+    {
+      "id": "format-response",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [900, 0],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "analysis",
+              "name": "analysis",
+              "type": "string",
+              "value": "={{ $('Root Cause Analysis').item.json.text }}"
+            },
+            {
+              "id": "rule",
+              "name": "rule",
+              "type": "string",
+              "value": "={{ $json.text }}"
+            },
+            {
+              "id": "error_type",
+              "name": "error_type",
+              "type": "string",
+              "value": "test_failure"
+            }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Root Cause Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Root Cause Analysis": {
+      "main": [
+        [
+          {
+            "node": "Rule Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rule Generator": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

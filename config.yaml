@@ -1,0 +1,48 @@
+# Prompt Learning Loop Configuration
+# Copy this file and customize for your environment
+
+# Teacher LLM configuration
+teacher:
+  # Mode: "local" uses Anthropic SDK directly, "webhook" uses n8n Cloud
+  mode: "local"
+  # Model to use for local mode (ignored if mode is webhook)
+  model: "claude-3-5-sonnet-20241022"
+  # Max tokens for responses
+  max_tokens: 1024
+
+# n8n webhook configuration (only used if teacher.mode is "webhook")
+n8n:
+  # Webhook URL for the n8n Teacher workflow
+  webhook_url: "https://im4tlai.app.n8n.cloud/webhook/prompt-learning-teacher"
+  # Timeout for webhook calls (seconds)
+  timeout: 60
+
+learning:
+  # Maximum retry attempts before giving up
+  max_retries: 3
+  # Automatically retry after learning a rule (true) or wait for manual trigger (false)
+  auto_retry: true
+
+tests:
+  # Test framework (currently only pytest is supported)
+  framework: "pytest"
+  # Command to run tests - customize for your project
+  command: "pytest tests/ -v --tb=short"
+  # Timeout for test execution (seconds)
+  timeout: 120
+
+claude:
+  # Maximum agentic turns per attempt
+  max_turns: 15
+  # Output format for Claude CLI
+  output_format: "json"
+  # Permission mode (use with caution in production)
+  # Options: "dangerously-skip-permissions" for full automation
+  permission_mode: "dangerously-skip-permissions"
+
+# Logging configuration
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
+  # Save detailed logs to file
+  log_file: null  # Set to path like "./learning_loop.log" to enable

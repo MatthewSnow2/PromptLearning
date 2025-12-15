@@ -1,0 +1,16 @@
+# Prompt Learning Loop Dependencies
+
+# Configuration parsing
+PyYAML>=6.0
+
+# HTTP requests for n8n webhook (fallback)
+requests>=2.28
+
+# Anthropic SDK for local Teacher LLM
+anthropic>=0.40.0
+
+# Testing framework (for the target projects)
+pytest>=7.0
+
+# Optional: Rich terminal output
+# rich>=13.0

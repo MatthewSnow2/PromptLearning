@@ -1,6 +1,6 @@
 # Prompt Learning Loop - Project Blueprint
 
-## Project Status: Ready for Testing
+## Project Status: Testing Complete (Partial)
 
 ## Completed Phases
 
@@ -25,12 +25,31 @@
   - Anthropic credentials configured
   - orchestrator.py updated to use webhook
 
+- [x] **Phase 5: End-to-End Testing** (2025-12-15)
+  - Orchestrator runs successfully
+  - Claude Code fixed the `safe_divide` bug on first attempt
+  - All tests passed after fix
+  - Git commit created: "Learning Loop Attempt 1"
+  - **Note**: No rules generated (no failure occurred to trigger Teacher LLM)
+
+## Test Results (2025-12-15)
+
+| Test | Result | Notes |
+|------|--------|-------|
+| Orchestrator execution | ✓ Pass | Ran with `--teacher webhook` mode |
+| Claude Code task attempt | ✓ Pass | Fixed bug: `return 0` → `return None` |
+| Git commit tracking | ✓ Pass | Commit created for diff tracking |
+| pytest verification | ✓ Pass | 7/7 tests passed after fix |
+| Teacher LLM feedback | ⚠ Not tested | Bug fixed on first attempt |
+| Rule appending | ⚠ Not tested | No failure occurred |
+
 ## Pending Phases
 
-- [ ] **Phase 5: End-to-End Testing**
-  - Test complete flow with example project
-  - Verify rules are correctly appended
-  - Validate retry mechanism
+- [ ] **Phase 6: Full Feedback Loop Testing**
+  - Create a more complex bug that Claude initially gets wrong
+  - Verify n8n webhook receives failure data
+  - Confirm rule generation and CLAUDE.md appending
+  - Test retry mechanism with learned rules
 
 ## Files Created
 
@@ -45,17 +64,27 @@
 
 ## Next Steps
 
-1. Follow N8N_SETUP.md to create the n8n workflow
-2. Configure Claude Code MCP settings
-3. Test with example project:
-   ```bash
-   python orchestrator.py "Fix the safe_divide function" --project-dir ./example_project
-   ```
+1. Create a more challenging example that Claude initially gets wrong
+2. Run orchestrator to trigger Teacher LLM feedback
+3. Verify rule generation and CLAUDE.md appending
 
 ## Key Decisions Made
 
 - **Architecture**: Claude Code as Orchestrator (n8n for Teacher LLM only)
-- **MCP Trigger**: Using n8n's MCP Server Trigger (not webhook)
+- **Teacher Mode**: Webhook (n8n) or Local (Anthropic SDK)
 - **Test Framework**: pytest only
 - **Diff Strategy**: Commit-based (git diff HEAD~1)
 - **Retry Mode**: Configurable (auto/manual)
+
+## Usage
+
+```bash
+# Basic usage (uses webhook mode by default)
+python3 orchestrator.py "Fix the safe_divide function" --project-dir ./example_project
+
+# With explicit teacher mode
+python3 orchestrator.py "Fix the bug" --project-dir ./example_project --teacher webhook
+
+# With local Anthropic SDK (requires ANTHROPIC_API_KEY)
+python3 orchestrator.py "Fix the bug" --project-dir ./example_project --teacher local
+```

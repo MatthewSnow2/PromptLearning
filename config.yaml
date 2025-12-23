@@ -6,7 +6,7 @@ teacher:
   # Mode: "local" uses Anthropic SDK directly, "webhook" uses n8n Cloud
   mode: "local"
   # Model to use for local mode (ignored if mode is webhook)
-  model: "claude-3-5-sonnet-20241022"
+  model: "claude-3-5-haiku-20241022"
   # Max tokens for responses
   max_tokens: 1024
 
@@ -22,6 +22,38 @@ learning:
   max_retries: 3
   # Automatically retry after learning a rule (true) or wait for manual trigger (false)
   auto_retry: true
+
+# Failure sources configuration
+# Defines what types of failures can be captured and analyzed
+failure_sources:
+  # Test-based failures (pytest, jest, etc.)
+  - name: "pytest"
+    type: "automated"
+    enabled: true
+    description: "Captures test failures from pytest runs"
+
+  # Manual failure reports (planning errors, integration mistakes, etc.)
+  - name: "manual"
+    type: "user_reported"
+    enabled: true
+    description: "Captures manually reported failures via 'report-failure' command"
+
+  # Semantic analysis (future: LLM reviews Claude output for quality issues)
+  - name: "semantic"
+    type: "llm_analysis"
+    enabled: false
+    description: "LLM-based analysis of Claude Code output quality"
+
+# Failure type to prompt mapping
+# Maps failure types to the appropriate system prompt
+failure_prompts:
+  test_failure: "default"
+  planning_error: "planning_error_system"
+  integration_error: "integration_error_system"
+  workflow_error: "workflow_error_system"
+  architecture_error: "architecture_error_system"
+  scope_error: "planning_error_system"
+  config_error: "integration_error_system"
 
 tests:
   # Test framework (currently only pytest is supported)

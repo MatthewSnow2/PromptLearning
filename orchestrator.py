@@ -10,10 +10,23 @@ Supports two Teacher modes:
 - local: Uses Anthropic SDK directly (requires ANTHROPIC_API_KEY)
 - webhook: Uses n8n Cloud webhook (fallback option)
 
+Now also supports manual failure reporting for non-test failures:
+- Planning errors
+- Workflow design errors
+- Architecture decisions
+- Integration mistakes
+
 Usage:
-    python orchestrator.py "Fix the bug in utils.py" --project-dir ./my-project
-    python orchestrator.py "Add input validation" --max-retries 5 --no-auto-retry
-    python orchestrator.py "Fix bug" --teacher webhook  # Use n8n instead of local
+    # Run learning loop (test-based)
+    python orchestrator.py run "Fix the bug" --project-dir ./my-project
+    python orchestrator.py run "Add validation" --max-retries 5 --no-auto-retry
+
+    # Report manual failure (non-test)
+    python orchestrator.py report-failure \\
+        --failure-type "integration_error" \\
+        --description "Created redundant workflow instead of extending existing" \\
+        --context "Should have checked existing infrastructure first" \\
+        --task "Deploy new n8n workflow"
 """
 
 import subprocess
@@ -68,7 +81,7 @@ class PromptLearningLoop:
         default_config = {
             "teacher": {
                 "mode": "local",  # "local" or "webhook"
-                "model": "claude-3-5-sonnet-20241022",
+                "model": "claude-3-5-haiku-20241022",
                 "max_tokens": 1024
             },
             "n8n": {
@@ -279,6 +292,64 @@ Rules automatically generated from the Prompt Learning Loop.
         """Reset to before the failed attempt."""
         run_command(["git", "reset", "--hard", "HEAD~1"], cwd=self.project_dir)
 
+    def report_manual_failure(
+        self,
+        failure_type: str,
+        description: str,
+        context: str,
+        task: str
+    ) -> bool:
+        """
+        Process manually reported failures (not from tests).
+
+        This is for capturing lessons from planning errors, integration mistakes,
+        workflow design issues, and other non-test failures.
+
+        Args:
+            failure_type: Category of failure (e.g., 'planning_error', 'integration_error')
+            description: What went wrong
+            context: Additional context about what should have happened
+            task: The original task that was being attempted
+
+        Returns:
+            True if rule was successfully generated and appended
+        """
+        print(f"\n{'='*60}")
+        print("MANUAL FAILURE REPORT")
+        print(f"{'='*60}")
+        print(f"Type: {failure_type}")
+        print(f"Task: {task[:80]}{'...' if len(task) > 80 else ''}")
+        print(f"{'='*60}")
+
+        # Use context as "diff" and description as "errors" for the Teacher LLM
+        print("\n> Analyzing failure with Teacher LLM...")
+        analysis = self.analyze_failure(
+            diff=f"## Context\n{context}",
+            errors=f"## Failure Description\n{description}",
+            task=task
+        )
+
+        if analysis.get("analysis"):
+            print(f"  [OK] Analysis: {analysis['analysis'][:100]}...")
+
+        # Append rule to CLAUDE.md
+        print("\n> Learning from failure...")
+        rule = analysis.get("rule", "")
+        if rule:
+            print(f"  New Rule: {rule[:100]}...")
+            # Use provided failure_type, not extracted one
+            self.append_rule(rule, f"{failure_type} (manual report)")
+            print(f"\n{'='*60}")
+            print("[OK] SUCCESS: Rule appended to CLAUDE.md")
+            print(f"{'='*60}")
+            return True
+        else:
+            print("  [WARN] No rule generated")
+            print(f"\n{'='*60}")
+            print("[FAIL] No rule could be generated")
+            print(f"{'='*60}")
+            return False
+
     def run(self, task: str) -> bool:
         """Main learning loop."""
         print(f"\n{'='*60}")
@@ -380,7 +451,7 @@ Rules automatically generated from the Prompt Learning Loop.
 
 
 def main():
-    """CLI entry point."""
+    """CLI entry point with subcommands."""
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -388,74 +459,195 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python orchestrator.py "Fix the validation bug" --project-dir ./my-project
-    python orchestrator.py "Add error handling to api.py" --max-retries 5
-    python orchestrator.py "Implement the login feature" --no-auto-retry
-    python orchestrator.py "Fix bug" --teacher webhook  # Use n8n instead of local
+    # Run test-based learning loop
+    python orchestrator.py run "Fix the validation bug" --project-dir ./my-project
+    python orchestrator.py run "Add error handling" --max-retries 5 --teacher webhook
+
+    # Report manual failure (non-test)
+    python orchestrator.py report-failure \\
+        --failure-type "integration_error" \\
+        --description "Created redundant workflow" \\
+        --context "Should have checked existing infrastructure first" \\
+        --task "Deploy n8n workflow"
+
+    # Legacy mode (without subcommand, defaults to 'run')
+    python orchestrator.py "Fix the bug" --project-dir ./my-project
         """
     )
 
-    parser.add_argument(
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # ========== 'run' subcommand ==========
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Run the test-based learning loop",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    run_parser.add_argument(
         "task",
         help="Task description for Claude Code to attempt"
     )
-    parser.add_argument(
+    run_parser.add_argument(
         "--project-dir", "-d",
         default=".",
         help="Project directory (default: current directory)"
     )
-    parser.add_argument(
+    run_parser.add_argument(
         "--max-retries", "-r",
         type=int,
         default=3,
         help="Maximum retry attempts (default: 3)"
     )
-    parser.add_argument(
+    run_parser.add_argument(
         "--no-auto-retry",
         action="store_true",
         help="Disable automatic retry after failure"
     )
-    parser.add_argument(
+    run_parser.add_argument(
         "--teacher", "-t",
         choices=["local", "webhook"],
         default=None,
-        help="Teacher LLM mode: 'local' (Anthropic SDK) or 'webhook' (n8n). Overrides config."
+        help="Teacher LLM mode: 'local' (Anthropic SDK) or 'webhook' (n8n)"
     )
-    parser.add_argument(
+    run_parser.add_argument(
+        "--config", "-c",
+        help="Path to config.yaml file"
+    )
+
+    # ========== 'report-failure' subcommand ==========
+    report_parser = subparsers.add_parser(
+        "report-failure",
+        help="Report a manual (non-test) failure for learning",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Failure Types:
+    planning_error      - Misunderstood requirements or wrong approach
+    integration_error   - Missed existing infrastructure, created duplicates
+    workflow_error      - n8n workflow design issues
+    architecture_error  - Wrong design patterns or structure
+    scope_error         - Over-engineered or under-scoped solution
+    config_error        - Missing or wrong configuration
+
+Example:
+    python orchestrator.py report-failure \\
+        --failure-type "integration_error" \\
+        --description "Created standalone workflow instead of extending existing Command Parser" \\
+        --context "Should have run n8n_list_workflows before creating new workflows" \\
+        --task "Import Design Wizard workflows to n8n"
+        """
+    )
+    report_parser.add_argument(
+        "--failure-type", "-f",
+        required=True,
+        choices=[
+            "planning_error", "integration_error", "workflow_error",
+            "architecture_error", "scope_error", "config_error", "other"
+        ],
+        help="Type of failure"
+    )
+    report_parser.add_argument(
+        "--description", "-D",
+        required=True,
+        help="What went wrong"
+    )
+    report_parser.add_argument(
+        "--context", "-C",
+        required=True,
+        help="Additional context (what should have happened)"
+    )
+    report_parser.add_argument(
+        "--task", "-T",
+        required=True,
+        help="The original task being attempted"
+    )
+    report_parser.add_argument(
+        "--teacher", "-t",
+        choices=["local", "webhook"],
+        default=None,
+        help="Teacher LLM mode: 'local' (Anthropic SDK) or 'webhook' (n8n)"
+    )
+    report_parser.add_argument(
         "--config", "-c",
         help="Path to config.yaml file"
     )
 
     args = parser.parse_args()
 
-    # Validate project directory
-    project_path = Path(args.project_dir).resolve()
-    if not project_path.exists():
-        print(f"Error: Project directory does not exist: {project_path}")
-        sys.exit(1)
+    # Handle legacy mode (no subcommand, task as first positional arg)
+    if args.command is None:
+        # Check if there's a positional arg that looks like a task
+        if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+            # Legacy mode: treat first arg as task
+            args.command = "run"
+            args.task = sys.argv[1]
+            # Re-parse remaining args for run command
+            remaining = sys.argv[2:]
+            legacy_parser = argparse.ArgumentParser()
+            legacy_parser.add_argument("--project-dir", "-d", default=".")
+            legacy_parser.add_argument("--max-retries", "-r", type=int, default=3)
+            legacy_parser.add_argument("--no-auto-retry", action="store_true")
+            legacy_parser.add_argument("--teacher", "-t", choices=["local", "webhook"], default=None)
+            legacy_parser.add_argument("--config", "-c", default=None)
+            legacy_args = legacy_parser.parse_args(remaining)
+            args.project_dir = legacy_args.project_dir
+            args.max_retries = legacy_args.max_retries
+            args.no_auto_retry = legacy_args.no_auto_retry
+            args.teacher = legacy_args.teacher
+            args.config = legacy_args.config
+        else:
+            parser.print_help()
+            sys.exit(1)
 
-    # Check for git repo
-    git_dir = project_path / ".git"
-    if not git_dir.exists():
-        print(f"Error: Project directory is not a git repository: {project_path}")
-        print("Initialize with: git init")
-        sys.exit(1)
+    # ========== Execute command ==========
+    if args.command == "run":
+        # Validate project directory
+        project_path = Path(args.project_dir).resolve()
+        if not project_path.exists():
+            print(f"Error: Project directory does not exist: {project_path}")
+            sys.exit(1)
 
-    # Run the learning loop
-    loop = PromptLearningLoop(
-        project_dir=str(project_path),
-        max_retries=args.max_retries,
-        auto_retry=not args.no_auto_retry,
-        config_path=args.config
-    )
+        # Check for git repo
+        git_dir = project_path / ".git"
+        if not git_dir.exists():
+            print(f"Error: Project directory is not a git repository: {project_path}")
+            print("Initialize with: git init")
+            sys.exit(1)
 
-    # Override teacher mode if specified via CLI
-    if args.teacher:
-        loop.config["teacher"]["mode"] = args.teacher
-        print(f"Teacher mode overridden to: {args.teacher}")
+        # Run the learning loop
+        loop = PromptLearningLoop(
+            project_dir=str(project_path),
+            max_retries=args.max_retries,
+            auto_retry=not args.no_auto_retry,
+            config_path=args.config
+        )
 
-    success = loop.run(args.task)
-    sys.exit(0 if success else 1)
+        # Override teacher mode if specified via CLI
+        if args.teacher:
+            loop.config["teacher"]["mode"] = args.teacher
+            print(f"Teacher mode: {args.teacher}")
+
+        success = loop.run(args.task)
+        sys.exit(0 if success else 1)
+
+    elif args.command == "report-failure":
+        # Create loop instance (no project_dir needed for manual reports)
+        loop = PromptLearningLoop(
+            project_dir=".",  # Not used for manual reports
+            config_path=args.config
+        )
+
+        # Override teacher mode if specified via CLI
+        if args.teacher:
+            loop.config["teacher"]["mode"] = args.teacher
+            print(f"Teacher mode: {args.teacher}")
+
+        success = loop.report_manual_failure(
+            failure_type=args.failure_type,
+            description=args.description,
+            context=args.context,
+            task=args.task
+        )
+        sys.exit(0 if success else 1)
 
 
 if __name__ == "__main__":

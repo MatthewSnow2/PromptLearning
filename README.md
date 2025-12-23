@@ -1,32 +1,56 @@
 # Prompt Learning Loop
 
-An automated meta-learning system that improves Claude Code's performance by iteratively updating its CLAUDE.md file based on test failures.
+An automated meta-learning system that improves Claude Code's performance by iteratively updating its CLAUDE.md file based on failures from multiple sources.
 
 ## Concept
 
-This implements "Meta-Prompting" - instead of fine-tuning models, we improve the instructions they receive. When Claude Code makes a mistake that causes tests to fail, the system:
+This implements "Meta-Prompting" - instead of fine-tuning models, we improve the instructions they receive. When Claude Code makes a mistake, the system:
 
-1. Captures the code diff and error logs
-2. Sends them to a "Teacher" LLM (via n8n Cloud)
-3. Analyzes the root cause of failure
+1. Captures the failure context (from tests, manual reports, or semantic analysis)
+2. Sends them to a "Teacher" LLM (local Anthropic SDK or n8n webhook)
+3. Analyzes the root cause using domain-specific prompts
 4. Generates a preventive rule
 5. Appends the rule to CLAUDE.md
-6. Retries the task with the new knowledge
+6. (For test failures) Retries the task with the new knowledge
 
 Over time, CLAUDE.md accumulates learned rules that prevent recurring mistakes.
+
+## Failure Sources
+
+The system supports multiple failure sources:
+
+| Source | Type | Description |
+|--------|------|-------------|
+| **pytest** | Automated | Test failures captured automatically |
+| **manual** | User Reported | Planning errors, integration mistakes, workflow issues |
+| **semantic** | LLM Analysis | (Future) LLM reviews Claude output for quality issues |
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    LOCAL (Claude Code)                       │
-├─────────────────────────────────────────────────────────────┤
-│  1. Task → 2. Claude Attempt → 3. pytest → 4. Pass/Fail     │
-│                                                 ↓            │
-│                                          [If Fail]          │
-│                                                 ↓            │
-│  8. Retry ← 7. Append Rule ← 6. Parse ← [n8n Cloud Teacher] │
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│                       FAILURE SOURCES                          │
+├────────────────┬─────────────────┬────────────────────────────┤
+│    pytest      │     Manual      │        Semantic            │
+│   (tests)      │  (user input)   │     (LLM analysis)         │
+└───────┬────────┴────────┬────────┴─────────────┬──────────────┘
+        │                 │                      │
+        └─────────────────┼──────────────────────┘
+                          ▼
+                  ┌───────────────┐
+                  │ Failure Router│
+                  │ (categorize)  │
+                  └───────┬───────┘
+                          ▼
+                  ┌───────────────┐
+                  │  Teacher LLM  │
+                  │(domain-aware) │
+                  └───────┬───────┘
+                          ▼
+                  ┌───────────────┐
+                  │  Append Rule  │
+                  │  (CLAUDE.md)  │
+                  └───────────────┘
 ```
 
 ## Quick Start
@@ -58,19 +82,60 @@ Follow the detailed guide in [N8N_SETUP.md](./N8N_SETUP.md) to:
 
 ### Usage
 
+#### Test-Based Learning (Automated)
+
 ```bash
-# Basic usage
-python orchestrator.py "Your task description" --project-dir ./your-project
+# Basic usage - run learning loop with pytest
+python orchestrator.py run "Your task description" --project-dir ./your-project
 
 # With options
-python orchestrator.py "Fix the validation bug" \
+python orchestrator.py run "Fix the validation bug" \
   --project-dir ./my-project \
   --max-retries 5 \
   --config ./config.yaml
 
 # Manual retry mode (stops after each failure for review)
-python orchestrator.py "Add error handling" --no-auto-retry
+python orchestrator.py run "Add error handling" --no-auto-retry
+
+# Legacy mode (without subcommand) still works
+python orchestrator.py "Your task description" --project-dir ./your-project
 ```
+
+#### Manual Failure Reporting
+
+Report planning errors, integration mistakes, or workflow issues that aren't caught by tests:
+
+```bash
+# Report a planning error
+python orchestrator.py report-failure \
+  --failure-type planning_error \
+  --description "Created new infrastructure instead of extending existing" \
+  --context "Should have checked for existing systems first" \
+  --task "Integrate new feature into codebase"
+
+# Report an integration error
+python orchestrator.py report-failure \
+  --failure-type integration_error \
+  --description "Created redundant n8n workflow instead of extending Command Parser" \
+  --context "Should have run n8n_list_workflows before creating new workflows" \
+  --task "Import Design Wizard workflows to n8n"
+
+# Report a workflow design error
+python orchestrator.py report-failure \
+  --failure-type workflow_error \
+  --description "Wrong node type used for error handling" \
+  --context "Should use Error Trigger node, not regular IF node" \
+  --task "Add error handling to webhook workflow"
+```
+
+**Available failure types:**
+- `planning_error` - Wrong approach, misunderstood requirements
+- `integration_error` - Missed existing infrastructure, created duplicates
+- `workflow_error` - n8n workflow design issues
+- `architecture_error` - Wrong design patterns
+- `scope_error` - Over/under-scoped solutions
+- `config_error` - Configuration or credential issues
+- `other` - General failures
 
 ### Try the Example
 
@@ -94,14 +159,42 @@ python ../orchestrator.py "Fix the safe_divide function to return None when divi
 Edit `config.yaml` to customize:
 
 ```yaml
+# Teacher LLM mode: "local" (Anthropic SDK) or "webhook" (n8n)
+teacher:
+  mode: "local"
+  model: "claude-3-5-sonnet-20241022"
+  max_tokens: 1024
+
+# n8n webhook (only used if teacher.mode is "webhook")
 n8n:
-  mcp_server: "n8n-teacher"
-  tool_name: "analyze_failure"
+  webhook_url: "https://your-instance.app.n8n.cloud/webhook/prompt-learning-teacher"
   timeout: 60
 
 learning:
   max_retries: 3
   auto_retry: true
+
+# Failure sources configuration
+failure_sources:
+  - name: "pytest"
+    type: "automated"
+    enabled: true
+
+  - name: "manual"
+    type: "user_reported"
+    enabled: true
+
+  - name: "semantic"
+    type: "llm_analysis"
+    enabled: false  # Future feature
+
+# Maps failure types to specialized prompts
+failure_prompts:
+  test_failure: "default"
+  planning_error: "planning_error_system"
+  integration_error: "integration_error_system"
+  workflow_error: "workflow_error_system"
+  architecture_error: "architecture_error_system"
 
 tests:
   framework: "pytest"
@@ -160,10 +253,11 @@ Rules are appended to `~/.claude/CLAUDE.md` under "Learned Rules & Patterns":
 
 ```
 PromptLearning/
-├── orchestrator.py      # Main learning loop script
+├── orchestrator.py      # Main learning loop and CLI
+├── teacher.py           # Local Teacher LLM (Anthropic SDK)
 ├── config.yaml          # Configuration options
 ├── requirements.txt     # Python dependencies
-├── N8N_SETUP.md        # n8n workflow setup guide
+├── N8N_SETUP.md        # n8n workflow setup guide (webhook mode)
 ├── README.md           # This file
 └── example_project/    # Sample project with intentional bugs
     ├── calculator.py   # Buggy calculator module
@@ -174,10 +268,10 @@ PromptLearning/
 
 ## Limitations
 
-- **n8n Cloud Required**: Uses n8n Cloud for the Teacher LLM workflow
+- **Anthropic API Key Required**: Local mode requires `ANTHROPIC_API_KEY` environment variable
 - **Commit-based Diffs**: Requires git; creates temporary commits for diff tracking
 - **pytest Only**: Currently supports pytest (other frameworks could be added)
-- **MCP Setup**: Requires MCP configuration between Claude Code and n8n
+- **n8n Cloud Optional**: Webhook mode requires n8n Cloud setup (see N8N_SETUP.md)
 
 ## Security Considerations
 
@@ -189,9 +283,10 @@ PromptLearning/
 
 Ideas for improvements:
 - Support for Jest/Vitest
-- Local LLM option instead of n8n Cloud
+- Semantic analysis mode (LLM reviews Claude output quality)
 - Rule deduplication and categorization
 - Metrics and learning analytics
+- Web UI for failure reporting
 
 ## License
 
